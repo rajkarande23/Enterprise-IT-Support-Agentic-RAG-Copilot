@@ -1,6 +1,6 @@
 import logging
 from typing import Literal
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_tavily import TavilySearch
 from langgraph.graph import StateGraph, START, END
 from app.core.config import get_settings
@@ -17,13 +17,23 @@ _web_search = None
 def llm():
     global _llm
     if _llm is None:
-        if not settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY is missing")
-        _llm = ChatOpenAI(
-            model=settings.openai_model,
-            temperature=0,
-            api_key=settings.openai_api_key,
-        )
+        if settings.groq_api_key:
+            _llm = ChatGroq(
+                model=settings.groq_model,
+                temperature=0,
+                api_key=settings.groq_api_key,
+            )
+        elif settings.openai_api_key:
+            from langchain_openai import ChatOpenAI
+            _llm = ChatOpenAI(
+                model=settings.openai_model,
+                temperature=0,
+                api_key=settings.openai_api_key,
+            )
+        else:
+            raise RuntimeError(
+                "GROQ_API_KEY is missing. Please set GROQ_API_KEY in your .env file to use free Groq LPU inference."
+            )
     return _llm
 
 def web_search_tool():
