@@ -12,7 +12,7 @@
       <div>
         <div class="brand-badge">FDE Project</div>
         <h1>IT Support<br/>Agentic RAG</h1>
-        <p class="muted">Private company knowledge first. External web only when evidence is weak.</p>
+        <p class="muted">Private company knowledge first. External web fallback. Automatic IT ticket escalation.</p>
       </div>
 
       <div class="workflow-card">
@@ -22,10 +22,16 @@
         <div class="flow-step">3. Grade evidence</div>
         <div class="flow-step">4. Web fallback if weak</div>
         <div class="flow-step">5. Rewrite & retry</div>
-        <div class="flow-step">6. Grounded answer</div>
+        <div class="flow-step">6. Answer or Escalate</div>
       </div>
 
-      <button id="openUpload" class="secondary-btn">+ Add Company Document</button>
+      <div class="sidebar-actions">
+        <button id="openUpload" class="secondary-btn full-w">+ Add Company Document</button>
+        <button id="openTicketModal" class="secondary-btn full-w">+ Create IT Ticket</button>
+        <button id="openTicketsListModal" class="secondary-btn full-w">
+          📋 View Tickets <span id="ticketCountBadge" class="ticket-badge-pill">0</span>
+        </button>
+      </div>
     </aside>
 
     <main class="main">
@@ -34,7 +40,9 @@
           <span class="status-dot"></span>
           <span>Enterprise Knowledge Copilot</span>
         </div>
-        <span class="pill">Agentic RAG</span>
+        <div class="topbar-right">
+          <span class="pill">Agentic RAG + IT Ticketing</span>
+        </div>
       </header>
 
       <section id="chat" class="chat-area">
@@ -42,7 +50,7 @@
           <div class="avatar">AI</div>
           <div class="bubble">
             <strong>How can I help with IT support?</strong>
-            <p>Try: “How do I connect to the company VPN?” or ask a question that may require current external vendor information.</p>
+            <p>Try asking about company policies, VPN, passwords, or request: <em>“Create an IT ticket for my broken laptop screen”</em>.</p>
           </div>
         </div>
       </section>
@@ -52,9 +60,10 @@
           <button class="example">How do I connect to the company VPN?</button>
           <button class="example">What is our password reset policy?</button>
           <button class="example">What is the latest Microsoft Teams outage guidance?</button>
+          <button class="example">Create a ticket: Unable to access production database</button>
         </div>
         <form id="chatForm" class="composer">
-          <textarea id="question" rows="2" placeholder="Ask an IT support question..." required></textarea>
+          <textarea id="question" rows="2" placeholder="Ask an IT support question or request a ticket..." required></textarea>
           <button type="submit" class="send-btn">Ask Agent</button>
         </form>
       </section>
@@ -65,20 +74,83 @@
       <p class="muted">Watch LangGraph decisions while the request runs.</p>
       <div id="trace" class="trace-list"><div class="empty">No request yet.</div></div>
       <div class="source-box">
-        <span>Final Source</span>
+        <span>Final Action</span>
         <strong id="sourceUsed">—</strong>
       </div>
     </aside>
   </div>
 
+  <!-- Document Upload Modal -->
   <div id="uploadModal" class="modal hidden">
     <div class="modal-card">
-      <div class="modal-head"><h2>Ingest Company Document</h2><button id="closeUpload">×</button></div>
+      <div class="modal-head"><h2>Ingest Company Document</h2><button id="closeUpload" class="close-x">×</button></div>
       <p class="muted">Upload PDF, TXT, Markdown, or DOCX. The document is chunked, embedded, and indexed into Pinecone.</p>
       <input id="adminKey" type="password" placeholder="Admin API key" />
       <input id="fileInput" type="file" accept=".pdf,.txt,.md,.docx" />
       <button id="uploadBtn" class="send-btn full">Index Document</button>
       <div id="uploadStatus" class="upload-status"></div>
+    </div>
+  </div>
+
+  <!-- Create Ticket Modal -->
+  <div id="ticketModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h2>Create IT Support Ticket</h2><button id="closeTicketModal" class="close-x">×</button></div>
+      <p class="muted">Submit an incident or request directly to the IT Service Desk.</p>
+      <form id="manualTicketForm">
+        <label class="form-label">Title / Summary</label>
+        <input id="ticketTitle" type="text" placeholder="e.g. Outlook crashing upon launch" required />
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select id="ticketCategory" class="modal-select">
+              <option value="General IT">General IT</option>
+              <option value="Network / VPN">Network / VPN</option>
+              <option value="Hardware">Hardware</option>
+              <option value="Software & Access">Software & Access</option>
+              <option value="Security / MFA">Security / MFA</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Priority</label>
+            <select id="ticketPriority" class="modal-select">
+              <option value="Low">Low</option>
+              <option value="Medium" selected>Medium</option>
+              <option value="High">High</option>
+              <option value="Critical">Critical</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="form-label">Requester Email</label>
+        <input id="ticketEmail" type="email" value="employee@novacore.internal" required />
+
+        <label class="form-label">Description / Symptoms</label>
+        <textarea id="ticketDesc" rows="3" class="modal-textarea" placeholder="Describe the issue, error codes, and steps to reproduce..." required></textarea>
+
+        <button type="submit" id="submitTicketBtn" class="send-btn full">Submit Incident Ticket</button>
+      </form>
+      <div id="ticketStatus" class="upload-status"></div>
+    </div>
+  </div>
+
+  <!-- View Tickets Dashboard Modal -->
+  <div id="ticketsListModal" class="modal hidden">
+    <div class="modal-card modal-lg">
+      <div class="modal-head">
+        <h2>IT Support Tickets Dashboard</h2>
+        <button id="closeTicketsListModal" class="close-x">×</button>
+      </div>
+      <div id="ticketStatsBar" class="stats-bar">
+        <div class="stat-box"><span class="stat-num" id="statTotal">0</span><span class="stat-lbl">Total</span></div>
+        <div class="stat-box"><span class="stat-num stat-open" id="statOpen">0</span><span class="stat-lbl">Open</span></div>
+        <div class="stat-box"><span class="stat-num stat-progress" id="statProgress">0</span><span class="stat-lbl">In Progress</span></div>
+        <div class="stat-box"><span class="stat-num stat-resolved" id="statResolved">0</span><span class="stat-lbl">Resolved</span></div>
+      </div>
+      <div id="ticketsContainer" class="tickets-container">
+        <div class="empty">Loading tickets...</div>
+      </div>
     </div>
   </div>
 

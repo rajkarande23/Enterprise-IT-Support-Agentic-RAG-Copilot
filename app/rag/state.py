@@ -1,10 +1,12 @@
-from typing import List, Literal
+from typing import List, Literal, Optional, Dict, Any
 from typing_extensions import TypedDict
 from pydantic import BaseModel, Field
 from langchain_core.documents import Document
 
 class RouteDecision(BaseModel):
-    route: Literal["kb", "direct"] = Field(description="kb for IT/support questions; direct for greetings/simple chat")
+    route: Literal["kb", "direct", "ticket"] = Field(
+        description="kb for general IT support questions; direct for greetings/casual chat; ticket for explicit requests to raise, file, or create an IT support ticket"
+    )
 
 class EvidenceGrade(BaseModel):
     grade: Literal["good", "weak"] = Field(description="Whether evidence is sufficient to answer")
@@ -21,3 +23,4 @@ class AgentState(TypedDict):
     retry_count: int
     trace: List[str]
     citations: List[dict]
+    ticket: Optional[Dict[str, Any]]

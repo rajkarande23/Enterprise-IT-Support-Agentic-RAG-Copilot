@@ -539,5 +539,43 @@ Protected by the `X-Admin-Key` request header.
 
 Uploads a document and adds its chunks to Pinecone.
 
+### `POST /api/tickets`
+
+Creates an IT support ticket (incident or service request).
+
+Request:
+```json
+{
+  "title": "Unable to connect to VPN",
+  "description": "Getting error code 800 when connecting to US-East gateway.",
+  "category": "Network / VPN",
+  "priority": "High",
+  "requester_email": "employee@novacore.internal"
+}
+```
+
+### `GET /api/tickets`
+
+Retrieves all IT support tickets along with status metrics (Total, Open, In Progress, Resolved).
+
+### `GET /api/tickets/{ticket_id}`
+
+Retrieves details and diagnostic trace for a specific incident ticket (`INC-XXXX`).
+
+### `PATCH /api/tickets/{ticket_id}`
+
+Updates the status of a ticket (`Open`, `In Progress`, `Resolved`, `Closed`).
+
 ---
+
+## 11. Automated Agentic Escalation & IT Ticketing
+
+When the Agentic RAG system determines that evidence is insufficient (or when the user explicitly requests an IT ticket), the agent automatically:
+1. Creates an incident ticket (`INC-XXXX`) in the SQLite database.
+2. Captures the full LangGraph reasoning and search trace for technician review.
+3. Notifies the user with their ticket reference and priority.
+4. Updates the real-time ticket dashboard in the UI.
+
+---
+
 

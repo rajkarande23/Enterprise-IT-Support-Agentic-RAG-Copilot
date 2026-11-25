@@ -6,6 +6,7 @@ from langgraph.graph import StateGraph, START, END
 from app.core.config import get_settings
 from app.rag.state import AgentState, RouteDecision, EvidenceGrade
 from app.rag.vectorstore import get_retriever
+from app.services.tickets import create_ticket
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -46,16 +47,44 @@ def route_question(state: AgentState):
     router = llm().with_structured_output(RouteDecision, method="json_mode")
     decision = router.invoke(f"""
 You route messages for an enterprise IT support assistant.
-Use kb for questions about company IT policies, VPN, password reset, MFA, laptop setup,
-software access, security, email, devices, troubleshooting, or technology support.
-Use direct only for greetings, thanks, or casual chat that needs no company knowledge.
+- Use ticket if the user explicitly asks to open, file, create, or escalate an IT ticket/incident (e.g., "create a ticket for...", "open ticket: broken screen", "file an issue").
+- Use kb for questions about company IT policies, VPN, password reset, MFA, laptop setup, software access, security, email, devices, troubleshooting, or technology support.
+- Use direct only for greetings, thanks, or casual chat that needs no company knowledge.
+
 Question: {state['question']}
 Return valid JSON like {{"route":"kb"}}.
 """)
     return {"source_used": decision.route, "trace": add_trace(state, f"Router → {decision.route.upper()}")}
 
-def route_after_router(state: AgentState) -> Literal["retrieve_kb", "direct_answer"]:
+def route_after_router(state: AgentState) -> Literal["retrieve_kb", "direct_answer", "create_ticket_node"]:
+    if state["source_used"] == "ticket":
+        return "create_ticket_node"
     return "retrieve_kb" if state["source_used"] == "kb" else "direct_answer"
+
+def create_ticket_node(state: AgentState):
+    ticket = create_ticket(
+        title=state["question"][:80],
+        description=state["question"],
+        category="General IT",
+        priority="Medium",
+        requester_email="employee@novacore.internal",
+        source="user_requested",
+        agent_trace=state.get("trace", []),
+    )
+    answer = (
+        f"I have created an IT Support Ticket for you:\n\n"
+        f"- **Ticket ID:** `{ticket['ticket_id']}`\n"
+        f"- **Status:** {ticket['status']}\n"
+        f"- **Priority:** {ticket['priority']}\n"
+        f"- **Subject:** {ticket['title']}\n\n"
+        f"Our IT Service Desk has been notified and an engineer will reach out to you shortly."
+    )
+    return {
+        "answer": answer,
+        "source_used": "ticket_created",
+        "ticket": ticket,
+        "trace": add_trace(state, f"Ticket Created → {ticket['ticket_id']}"),
+    }
 
 def retrieve_kb(state: AgentState):
     docs = get_retriever().invoke(state["current_query"])
@@ -154,16 +183,33 @@ def direct_answer(state: AgentState):
     return {"answer": answer, "source_used": "direct", "trace": add_trace(state, "Direct response → no retrieval")}
 
 def insufficient(state: AgentState):
+    # Automatically escalate to an IT support ticket when evidence is insufficient
+    ticket = create_ticket(
+        title=f"Unresolved Query: {state['question'][:60]}",
+        description=f"User asked: {state['question']}\n\nAutomated RAG check could not find sufficient private or external documentation. Escalated for human technician review.",
+        category="General IT",
+        priority="Medium",
+        requester_email="employee@novacore.internal",
+        source="agent_escalation",
+        agent_trace=state.get("trace", []),
+    )
+    answer = (
+        f"I couldn't find enough reliable evidence in the company knowledge base or vendor guidance to answer confidently.\n\n"
+        f"To ensure your issue is resolved, **I have automatically opened IT Support Ticket #{ticket['ticket_id']}** (Status: Open, Priority: Medium).\n"
+        f"Our IT Help Desk has been dispatched with the troubleshooting trace and will follow up with you."
+    )
     return {
-        "answer": "I couldn't find enough reliable evidence in the company knowledge base or external search to answer confidently. Please contact the IT help desk or provide more details.",
-        "source_used": "insufficient_evidence",
-        "trace": add_trace(state, "Stopped → insufficient reliable evidence"),
+        "answer": answer,
+        "source_used": "ticket_escalation",
+        "ticket": ticket,
+        "trace": add_trace(state, f"Auto Escalation → Created IT Ticket {ticket['ticket_id']}"),
     }
 
 def build_graph():
     graph = StateGraph(AgentState)
     for name, fn in {
         "route_question": route_question,
+        "create_ticket_node": create_ticket_node,
         "retrieve_kb": retrieve_kb,
         "grade_kb": grade_kb,
         "search_web": search_web,
@@ -178,15 +224,21 @@ def build_graph():
 
     graph.add_edge(START, "route_question")
     graph.add_conditional_edges("route_question", route_after_router, {
-        "retrieve_kb": "retrieve_kb", "direct_answer": "direct_answer"
+        "retrieve_kb": "retrieve_kb",
+        "direct_answer": "direct_answer",
+        "create_ticket_node": "create_ticket_node",
     })
+    graph.add_edge("create_ticket_node", END)
     graph.add_edge("retrieve_kb", "grade_kb")
     graph.add_conditional_edges("grade_kb", after_kb, {
-        "generate_from_kb": "generate_from_kb", "search_web": "search_web"
+        "generate_from_kb": "generate_from_kb",
+        "search_web": "search_web",
     })
     graph.add_edge("search_web", "grade_web")
     graph.add_conditional_edges("grade_web", after_web, {
-        "generate_from_web": "generate_from_web", "rewrite_query": "rewrite_query", "insufficient": "insufficient"
+        "generate_from_web": "generate_from_web",
+        "rewrite_query": "rewrite_query",
+        "insufficient": "insufficient",
     })
     graph.add_edge("rewrite_query", "retrieve_kb")
     graph.add_edge("generate_from_kb", END)
@@ -210,5 +262,6 @@ def ask(question: str):
         "retry_count": 0,
         "trace": [],
         "citations": [],
+        "ticket": None,
     }
     return agent_graph.invoke(initial)
